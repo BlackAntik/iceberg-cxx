@@ -53,6 +53,8 @@ struct Names {
   static constexpr const char* id = "id";
   static constexpr const char* name = "name";
   static constexpr const char* required = "required";
+  static constexpr const char* initial_default = "initial-default";
+  static constexpr const char* write_default = "write-default";
   static constexpr const char* source_id = "source-id";
   static constexpr const char* field_id = "field-id";
   static constexpr const char* transform = "transform";
@@ -109,7 +111,7 @@ class WriterContext {
   }
 
   template <typename T>
-  auto WriteIntField(rapidjson::Value& doc, std::string_view field_name, T value) {
+  auto WriteNumericField(rapidjson::Value& doc, std::string_view field_name, T value) {
     doc.AddMember(rapidjson::StringRef(field_name.data(), field_name.size()), value, GetAllocator());
   }
 
@@ -133,8 +135,8 @@ class WriterContext {
 
       WriteStringField(element, field_name, Names::list);
       auto* list_type = static_cast<const types::ListType*>(&type);
-      WriteIntField(element, Names::element_id, list_type->ElementId());
-      WriteIntField(element, Names::element_required, list_type->ElementRequired());
+      WriteNumericField(element, Names::element_id, list_type->ElementId());
+      WriteNumericField(element, Names::element_required, list_type->ElementRequired());
       if (!list_type->ElementType()) {
         throw std::runtime_error(std::string(__FUNCTION__) + ": no type");
       }
@@ -144,14 +146,49 @@ class WriterContext {
     }
   }
 
+  void WriteDefaultValue(rapidjson::Value& doc, const std::string& field_name, const types::Type& type, const Literal& literal) {
+    auto scalar = literal.GetScalar();
+    switch (type.TypeId()) {
+      case TypeID::kBoolean:
+        WriteNumericField(doc, field_name, std::static_pointer_cast<arrow::BooleanScalar>(scalar)->value);
+      case TypeID::kInt:
+        WriteNumericField(doc, field_name, std::static_pointer_cast<arrow::Int32Scalar>(scalar)->value);
+      case TypeID::kLong:
+        WriteNumericField(doc, field_name, std::static_pointer_cast<arrow::Int64Scalar>(scalar)->value);
+      case TypeID::kFloat:
+        WriteNumericField(doc, field_name, std::static_pointer_cast<arrow::FloatScalar>(scalar)->value);
+      case TypeID::kDouble:
+        WriteNumericField(doc, field_name, std::static_pointer_cast<arrow::DoubleScalar>(scalar)->value);
+      case TypeID::kDecimal:
+      case TypeID::kDate:
+      case TypeID::kTime:
+      case TypeID::kTimestamp:
+      case TypeID::kTimestamptz:
+      case TypeID::kTimestampNs:
+      case TypeID::kTimestamptzNs:
+      case TypeID::kString:
+      case TypeID::kUuid:
+      case TypeID::kFixed:
+      case TypeID::kBinary:
+      case TypeID::kList:
+        WriteStringField(doc, field_name, scalar->ToString());
+    }
+  }
+
   void WriteField(rapidjson::Value& doc, const types::NestedField& field) {
-    WriteIntField(doc, Names::id, field.field_id);
+    WriteNumericField(doc, Names::id, field.field_id);
     WriteStringField(doc, Names::name, field.name);
-    WriteIntField(doc, Names::required, field.is_required);
+    WriteNumericField(doc, Names::required, field.is_required);
     if (!field.type) {
       throw std::runtime_error(std::string(__FUNCTION__) + ": no type");
     }
     WriteDataType(doc, *field.type, Names::type);
+    if (field.initial_default.has_value()) {
+      WriteDefaultValue(doc, Names::initial_default, *field.type, *field.initial_default);
+    }
+    if (field.write_default.has_value()) {
+      WriteDefaultValue(doc, Names::write_default, *field.type, *field.write_default);
+    }
   }
 
   void WriteSchemas(rapidjson::Value& doc, const std::vector<std::shared_ptr<Schema>>& array) {
@@ -160,7 +197,7 @@ class WriterContext {
       rapidjson::Value schema(rapidjson::kObjectType);
 
       WriteStringField(schema, Names::type, Names::struct_);
-      WriteIntField(schema, Names::schema_id, s->SchemaId());
+      WriteNumericField(schema, Names::schema_id, s->SchemaId());
 
       rapidjson::Value fields(rapidjson::kArrayType);
       for (auto column : s->Columns()) {
@@ -176,8 +213,8 @@ class WriterContext {
   }
 
   void WritePartitionField(rapidjson::Value& doc, const PartitionField& field) {
-    WriteIntField(doc, Names::source_id, field.source_id);
-    WriteIntField(doc, Names::field_id, field.field_id);
+    WriteNumericField(doc, Names::source_id, field.source_id);
+    WriteNumericField(doc, Names::field_id, field.field_id);
     WriteStringField(doc, Names::name, field.name);
     WriteStringField(doc, Names::transform, field.transform);
   }
@@ -187,7 +224,7 @@ class WriterContext {
     for (auto& s : array) {
       rapidjson::Value spec(rapidjson::kObjectType);
 
-      WriteIntField(spec, Names::spec_id, s->spec_id);
+      WriteNumericField(spec, Names::spec_id, s->spec_id);
 
       rapidjson::Value fields(rapidjson::kArrayType);
       for (auto pf : s->fields) {
@@ -209,12 +246,12 @@ class WriterContext {
   }
 
   void WriteSnapshot(rapidjson::Value& document, const Snapshot& snap) {
-    WriteIntField(document, Names::sequence_number, snap.sequence_number);
-    WriteIntField(document, Names::snapshot_id, snap.snapshot_id);
+    WriteNumericField(document, Names::sequence_number, snap.sequence_number);
+    WriteNumericField(document, Names::snapshot_id, snap.snapshot_id);
     if (snap.parent_snapshot_id) {
-      WriteIntField(document, Names::parent_snapshot_id, *snap.parent_snapshot_id);
+      WriteNumericField(document, Names::parent_snapshot_id, *snap.parent_snapshot_id);
     }
-    WriteIntField(document, Names::timestamp_ms, snap.timestamp_ms);
+    WriteNumericField(document, Names::timestamp_ms, snap.timestamp_ms);
 
     if (!snap.summary.contains(Names::operation)) {
       throw std::runtime_error(std::string(__FUNCTION__) + ": no operation in summary");
@@ -226,7 +263,7 @@ class WriterContext {
 
     WriteStringField(document, Names::manifest_list, snap.manifest_list_location);
     if (snap.schema_id) {
-      WriteIntField(document, Names::schema_id, *snap.schema_id);
+      WriteNumericField(document, Names::schema_id, *snap.schema_id);
     }
   }
 
@@ -245,8 +282,8 @@ class WriterContext {
 
   void WriteBlobMetadata(rapidjson::Value& document, const BlobMetadata& blob_meta) {
     WriteProperties(document, blob_meta.properties);
-    WriteIntField(document, Names::sequence_number, blob_meta.sequence_number);
-    WriteIntField(document, Names::snapshot_id, blob_meta.snapshot_id);
+    WriteNumericField(document, Names::sequence_number, blob_meta.sequence_number);
+    WriteNumericField(document, Names::snapshot_id, blob_meta.snapshot_id);
     WriteStringField(document, Names::type, blob_meta.type);
 
     rapidjson::Value field_id_array(rapidjson::kArrayType);
@@ -259,9 +296,9 @@ class WriterContext {
 
   void WriteStatistic(rapidjson::Value& document, const Statistics& stat) {
     WriteStringField(document, Names::statistics_path, stat.statistics_path);
-    WriteIntField(document, Names::snapshot_id, stat.snapshot_id);
-    WriteIntField(document, Names::file_size_in_bytes, stat.file_size_in_bytes);
-    WriteIntField(document, Names::file_footer_size_in_bytes, stat.file_footer_size_in_bytes);
+    WriteNumericField(document, Names::snapshot_id, stat.snapshot_id);
+    WriteNumericField(document, Names::file_size_in_bytes, stat.file_size_in_bytes);
+    WriteNumericField(document, Names::file_footer_size_in_bytes, stat.file_footer_size_in_bytes);
 
     rapidjson::Value blob_metadata_array(rapidjson::kArrayType);
     for (const auto& blob : stat.blob_metadata) {
@@ -283,8 +320,8 @@ class WriterContext {
   }
 
   void WriteSnapshotLogEntry(rapidjson::Value& doc, const SnapshotLog& entry) {
-    WriteIntField(doc, Names::timestamp_ms, entry.timestamp_ms);
-    WriteIntField(doc, Names::snapshot_id, entry.snapshot_id);
+    WriteNumericField(doc, Names::timestamp_ms, entry.timestamp_ms);
+    WriteNumericField(doc, Names::snapshot_id, entry.snapshot_id);
   }
 
   void WriteSnapshotLog(rapidjson::Value& doc, const std::vector<SnapshotLog>& snap_log) {
@@ -301,7 +338,7 @@ class WriterContext {
   }
 
   void WriteMetadataLogEntry(rapidjson::Value& doc, const MetadataLog& entry) {
-    WriteIntField(doc, Names::timestamp_ms, entry.timestamp_ms);
+    WriteNumericField(doc, Names::timestamp_ms, entry.timestamp_ms);
     WriteStringField(doc, Names::metadata_file, entry.metadata_file);
   }
 
@@ -329,7 +366,7 @@ class WriterContext {
 
   void WriteSortField(rapidjson::Value& doc, const SortField& field) {
     WriteStringField(doc, Names::transform, field.transform);
-    WriteIntField(doc, Names::source_id, field.source_id);
+    WriteNumericField(doc, Names::source_id, field.source_id);
     WriteStringField(doc, Names::direction, (field.direction == SortDirection::kAsc ? Names::asc : Names::desc));
     WriteStringField(doc, Names::null_order,
                      (field.null_order == NullOrder::kNullsFirst ? Names::nulls_first : Names::nulls_last));
@@ -340,7 +377,7 @@ class WriterContext {
     for (auto& s : array) {
       rapidjson::Value spec(rapidjson::kObjectType);
 
-      WriteIntField(spec, Names::order_id, s->order_id);
+      WriteNumericField(spec, Names::order_id, s->order_id);
 
       rapidjson::Value fields(rapidjson::kArrayType);
       for (auto pf : s->fields) {
@@ -357,16 +394,16 @@ class WriterContext {
 
   void WriteRefField(rapidjson::Value& doc, const std::string& name, const SnapshotRef& snap_ref) {
     rapidjson::Value ref(rapidjson::kObjectType);
-    WriteIntField(ref, Names::snapshot_id, snap_ref.snapshot_id);
+    WriteNumericField(ref, Names::snapshot_id, snap_ref.snapshot_id);
     WriteStringField(ref, Names::type, snap_ref.type);
     if (snap_ref.min_snapshots_to_keep) {
-      WriteIntField(ref, Names::min_snapshots_to_keep, *snap_ref.min_snapshots_to_keep);
+      WriteNumericField(ref, Names::min_snapshots_to_keep, *snap_ref.min_snapshots_to_keep);
     }
     if (snap_ref.max_snapshot_age_ms) {
-      WriteIntField(ref, Names::max_snapshot_age_ms, *snap_ref.max_snapshot_age_ms);
+      WriteNumericField(ref, Names::max_snapshot_age_ms, *snap_ref.max_snapshot_age_ms);
     }
     if (snap_ref.max_ref_age_ms) {
-      WriteIntField(ref, Names::max_ref_age_ms, *snap_ref.max_ref_age_ms);
+      WriteNumericField(ref, Names::max_ref_age_ms, *snap_ref.max_ref_age_ms);
     }
 
     doc.AddMember(rapidjson::StringRef(name.data(), name.size()), ref.Move(), GetAllocator());
@@ -439,6 +476,15 @@ std::shared_ptr<const types::Type> JsonToDataType(const rapidjson::Value& value)
   throw std::runtime_error(std::string(__FUNCTION__) + ": unknown type");
 }
 
+std::optional<Literal> ExtractOptionalLiteral(const rapidjson::Value& document, const std::string& field_name,
+                                              std::shared_ptr<const types::Type> type) {
+  const char* c_str = field_name.c_str();
+  if (!document.HasMember(c_str)) {
+    return std::nullopt;
+  }
+  return ParseLiteral(type, document[c_str]);
+}
+
 types::NestedField JsonToField(const rapidjson::Value& document) {
   types::NestedField result;
   result.field_id = json_parse::ExtractInt32Field(document, Names::id);
@@ -450,6 +496,8 @@ types::NestedField JsonToField(const rapidjson::Value& document) {
   }
 
   result.type = JsonToDataType(document[Names::type]);
+  result.initial_default = ExtractOptionalLiteral(document, Names::initial_default, result.type);
+  result.write_default = ExtractOptionalLiteral(document, Names::write_default, result.type);
   return result;
 }
 
@@ -969,23 +1017,23 @@ std::string WriteTableMetadataV2(const TableMetadataV2& metadata, bool pretty) {
 
   WriterContext ctx(document.GetAllocator());
 
-  ctx.WriteIntField(document, Names::format_version, metadata.format_vesion);
+  ctx.WriteNumericField(document, Names::format_version, metadata.format_vesion);
   ctx.WriteStringField(document, Names::table_uuid, metadata.table_uuid);
   ctx.WriteStringField(document, Names::location, metadata.location);
-  ctx.WriteIntField(document, Names::last_sequence_number, metadata.last_sequence_number);
-  ctx.WriteIntField(document, Names::last_updated_ms, metadata.last_updated_ms);
-  ctx.WriteIntField(document, Names::last_column_id, metadata.last_column_id);
-  ctx.WriteIntField(document, Names::current_schema_id, metadata.current_schema_id);
+  ctx.WriteNumericField(document, Names::last_sequence_number, metadata.last_sequence_number);
+  ctx.WriteNumericField(document, Names::last_updated_ms, metadata.last_updated_ms);
+  ctx.WriteNumericField(document, Names::last_column_id, metadata.last_column_id);
+  ctx.WriteNumericField(document, Names::current_schema_id, metadata.current_schema_id);
   ctx.WriteSchemas(document, metadata.schemas);
-  ctx.WriteIntField(document, Names::default_spec_id, metadata.default_spec_id);
+  ctx.WriteNumericField(document, Names::default_spec_id, metadata.default_spec_id);
   ctx.WritePartitionSpec(document, metadata.partition_specs);
-  ctx.WriteIntField(document, Names::last_partition_id, metadata.last_partition_id);
-  ctx.WriteIntField(document, Names::default_sort_order_id, metadata.default_sort_order_id);
+  ctx.WriteNumericField(document, Names::last_partition_id, metadata.last_partition_id);
+  ctx.WriteNumericField(document, Names::default_sort_order_id, metadata.default_sort_order_id);
   ctx.WriteSortOrder(document, metadata.sort_orders);
   ctx.WriteProperties(document, metadata.properties);
   ctx.WriteStatistics(document, metadata.statistics);
   if (metadata.current_snapshot_id) {
-    ctx.WriteIntField(document, Names::current_snapshot_id, *metadata.current_snapshot_id);
+    ctx.WriteNumericField(document, Names::current_snapshot_id, *metadata.current_snapshot_id);
   }
   ctx.WriteRefs(document, metadata.refs);
   ctx.WriteSnapshots(document, metadata.snapshots);
