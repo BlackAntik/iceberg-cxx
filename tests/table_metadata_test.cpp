@@ -98,6 +98,10 @@ void Check(const TableMetadataV2& metadata) {
   // EXPECT_EQ(metadata.refs, expected_refs);
 }
 
+void CheckColumnDefaults(const std::string& column_name) {
+
+}
+
 constexpr char UNEXPECTED_EXCEPTION[] = "Unexpected exception";
 constexpr char NO_EXCEPTION[] = "Expected runtime-error was not thrown";
 
@@ -261,6 +265,15 @@ TEST(Metadata, WithFixedType) {
   auto metadata = ice_tea::ReadTableMetadataV2(input);
   ASSERT_TRUE(metadata);
   EXPECT_EQ(metadata->GetCurrentSchema()->Columns()[1].type->ToString(), "fixed(12)");
+}
+
+TEST(Metadata, WithInitialDefaults) {
+  std::ifstream input("warehouse/SchemaWithDefaults.json");
+
+  auto metadata = ice_tea::ReadTableMetadataV2(input);
+  ASSERT_TRUE(metadata);
+  auto columns = metadata->GetCurrentSchema()->Columns();
+  ASSERT_EQ(columns.size(), 15);
 }
 
 TEST(Metadata, EmptyTableUUID) {

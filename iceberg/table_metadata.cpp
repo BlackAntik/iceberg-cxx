@@ -53,6 +53,8 @@ struct Names {
   static constexpr const char* id = "id";
   static constexpr const char* name = "name";
   static constexpr const char* required = "required";
+  static constexpr const char* initial_default = "initial-default";
+  static constexpr const char* write_default = "write-default";
   static constexpr const char* source_id = "source-id";
   static constexpr const char* field_id = "field-id";
   static constexpr const char* transform = "transform";
@@ -439,6 +441,15 @@ std::shared_ptr<const types::Type> JsonToDataType(const rapidjson::Value& value)
   throw std::runtime_error(std::string(__FUNCTION__) + ": unknown type");
 }
 
+std::optional<Literal> ExtractOptionalLiteral(const rapidjson::Value& document, const std::string& field_name,
+                                              std::shared_ptr<const types::Type> type) {
+  const char* c_str = field_name.c_str();
+  if (!document.HasMember(c_str)) {
+    return std::nullopt;
+  }
+  return ParseLiteral(type, document[c_str]);
+}
+
 types::NestedField JsonToField(const rapidjson::Value& document) {
   types::NestedField result;
   result.field_id = json_parse::ExtractInt32Field(document, Names::id);
@@ -450,6 +461,8 @@ types::NestedField JsonToField(const rapidjson::Value& document) {
   }
 
   result.type = JsonToDataType(document[Names::type]);
+  result.initial_default = ExtractOptionalLiteral(document, Names::initial_default, result.type);
+  result.write_default = ExtractOptionalLiteral(document, Names::write_default, result.type);
   return result;
 }
 
